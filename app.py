@@ -1,4 +1,31 @@
 import streamlit as st
+import joblib
+import pandas as pd
+import numpy as np
+from sklearn.base import BaseEstimator, TransformerMixin
+
+# ==========================================
+# PASTE YOUR CUSTOM CLASS HERE (EXACTLY AS IT WAS IN NOTEBOOK)
+# ==========================================
+class CombinedAttributesAdder(BaseEstimator, TransformerMixin):
+    def __init__(self, add_bedrooms_per_room=True): 
+        self.add_bedrooms_per_room = add_bedrooms_per_room
+    def fit(self, X, y=None):
+        return self
+    def transform(self, X):
+        # ... logic ...
+        return X
+# ==========================================
+
+# NOW load the model (Streamlit can now "see" the class above)
+model = joblib.load('car_price_pipeline.pkl')
+
+# The rest of your app code...
+
+
+
+
+import streamlit as st
 import pandas as pd
 import joblib
 import matplotlib.pyplot as plt
@@ -71,4 +98,5 @@ st.write("""
 In conclusion, our model performs well with 88% accuracy. 
 The analysis shows that **Horsepower** and **Engine Size** are the strongest predictors of a car's price. 
 Premium brands like BMW and Porsche naturally cost more, regardless of size.
+
 """)
