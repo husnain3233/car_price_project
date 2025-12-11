@@ -1,40 +1,86 @@
 import streamlit as st
-import joblib
 import pandas as pd
 import numpy as np
-from sklearn.base import BaseEstimator, TransformerMixin
-
-# ==========================================
-# PASTE YOUR CUSTOM CLASS HERE (EXACTLY AS IT WAS IN NOTEBOOK)
-# ==========================================
-class CombinedAttributesAdder(BaseEstimator, TransformerMixin):
-    def __init__(self, add_bedrooms_per_room=True): 
-        self.add_bedrooms_per_room = add_bedrooms_per_room
-    def fit(self, X, y=None):
-        return self
-    def transform(self, X):
-        # ... logic ...
-        return X
-# ==========================================
-
-# NOW load the model (Streamlit can now "see" the class above)
-model = joblib.load('car_price_pipeline.pkl')
-
-# The rest of your app code...
-
-
-
-
-import streamlit as st
-import pandas as pd
-import joblib
 import matplotlib.pyplot as plt
 import seaborn as sns
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LinearRegression
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.pipeline import Pipeline
+from sklearn.metrics import r2_score, mean_squared_error
 
-# Load the trained model
-pipeline = joblib.load("car_price_pipeline.pkl")
+# --- 1. SETUP & MODEL TRAINING (Cached) ---
+# We use @st.cache_resource so the model trains only once when the app starts.
+# This avoids the "AttributeError" from loading incompatible .pkl files.
+@st.cache_resource
+def load_and_train_model():
+    # 1. Load Data
+    try:
+        df = pd.read_csv("car_data.csv")
+    except FileNotFoundError:
+        st.error("Error: 'car_data.csv' not found. Please upload it to your GitHub repository.")
+        return None, None, None
 
-# --- 1. INTRODUCTION ---
+    # 2. Preprocessing (Matching your Notebook Logic)
+    # Ensure column names are clean
+    # Check if 'CarName' exists (CamelCase) or 'carname' (lowercase)
+    if 'CarName' in df.columns:
+        car_col = 'CarName'
+    else:
+        car_col = 'carname' # Fallback
+        
+    # Extract Brand
+    df['brand'] = df[car_col].apply(lambda x: x.split(' ')[0].lower())
+    
+    # Fix Spelling (from your notebook)
+    brand_corrections = {
+        'maxda': 'mazda', 'porcshce': 'porsche', 'toyouta': 'toyota', 
+        'vokswagen': 'volkswagen', 'vw': 'volkswagen'
+    }
+    df['brand'] = df['brand'].replace(brand_corrections)
+
+    # 3. Define Features
+    features = ['enginesize', 'curbweight', 'horsepower', 'citympg', 'highwaympg', 'brand']
+    target = 'price'
+    
+    # Handle capitalization differences in CSV
+    # Rename columns to lowercase to ensure matching
+    df.columns = [c.lower() for c in df.columns]
+    
+    X = df[features]
+    y = df[target]
+
+    # 4. Build Pipeline
+    numeric_features = ['enginesize', 'curbweight', 'horsepower', 'citympg', 'highwaympg']
+    categorical_features = ['brand']
+
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ('num', StandardScaler(), numeric_features),
+            ('cat', OneHotEncoder(handle_unknown='ignore'), categorical_features)
+        ])
+
+    pipeline = Pipeline(steps=[
+        ('preprocessor', preprocessor),
+        ('regressor', LinearRegression())
+    ])
+
+    # 5. Train Model
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    pipeline.fit(X_train, y_train)
+    
+    # Calculate Metrics
+    y_pred = pipeline.predict(X_test)
+    r2 = r2_score(y_test, y_pred)
+    rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+    
+    return pipeline, df, (r2, rmse)
+
+# Load the model and data
+pipeline, df, metrics = load_and_train_model()
+
+# --- 2. INTRODUCTION ---
 st.title("Car Price Prediction Project")
 st.subheader("Student Name: Husnain Raza")
 st.write("""
@@ -42,13 +88,10 @@ st.write("""
 We explore how factors like engine size, horsepower, and brand influence the cost of a vehicle.
 """)
 
-# --- 2. EDA SECTION (Exploratory Data Analysis) ---
-if st.checkbox("Show Data Analysis (EDA)"):
+# --- 3. EDA SECTION ---
+if df is not None and st.checkbox("Show Data Analysis (EDA)"):
     st.subheader("Exploratory Data Analysis")
     st.write("Here is how different features relate to Price:")
-    
-    # We need to load the data again just for plotting
-    df = pd.read_csv("car_data.csv")
     
     # Plot 1: Distribution of Prices
     st.write("**1. Distribution of Car Prices**")
@@ -62,17 +105,20 @@ if st.checkbox("Show Data Analysis (EDA)"):
     sns.scatterplot(x=df['horsepower'], y=df['price'], ax=ax2)
     st.pyplot(fig2)
 
-# --- 3. MODEL PREDICTION ---
+# --- 4. MODEL PREDICTION ---
 st.subheader("Predict Car Price")
 st.write("Enter the car details below to get a price estimate:")
 
 # Input fields
-enginesize = st.number_input("Engine Size", 50, 400, 120)
-curbweight = st.number_input("Curb Weight", 1000, 4000, 2000)
-horsepower = st.number_input("Horsepower", 40, 350, 100)
-citympg = st.number_input("City MPG", 5, 60, 25)
-highwaympg = st.number_input("Highway MPG", 5, 60, 30)
-brand = st.text_input("Brand (e.g. toyota, bmw, audi)", "toyota")
+col1, col2 = st.columns(2)
+with col1:
+    enginesize = st.number_input("Engine Size", 50, 400, 120)
+    curbweight = st.number_input("Curb Weight", 1000, 5000, 2500)
+    horsepower = st.number_input("Horsepower", 40, 500, 150)
+with col2:
+    citympg = st.number_input("City MPG", 5, 60, 25)
+    highwaympg = st.number_input("Highway MPG", 5, 60, 30)
+    brand = st.text_input("Brand (e.g. toyota, bmw, audi)", "toyota")
 
 # Create a dataframe for the model
 input_df = pd.DataFrame([{
@@ -85,18 +131,24 @@ input_df = pd.DataFrame([{
 }])
 
 if st.button("Predict Price"):
-    prediction = pipeline.predict(input_df)[0]
-    st.success(f"Estimated Price: ${prediction:,.2f}")
+    if pipeline is not None:
+        try:
+            prediction = pipeline.predict(input_df)[0]
+            st.success(f"Estimated Price: ${prediction:,.2f}")
+        except Exception as e:
+            st.error(f"Prediction Error: {e}")
+    else:
+        st.error("Model failed to load. Check dataset.")
 
-# --- 4. MODEL METRICS & CONCLUSION ---
-st.subheader("Model Performance")
-st.write(f"**Model Accuracy (R² Score):** 88.0%")
-st.write("**RMSE (Error):** ~3099")
+# --- 5. MODEL METRICS ---
+if metrics:
+    st.subheader("Model Performance")
+    st.write(f"**Model Accuracy (R² Score):** {metrics[0]*100:.1f}%")
+    st.write(f"**RMSE (Error):** ${metrics[1]:,.0f}")
 
 st.subheader("Conclusion")
 st.write("""
-In conclusion, our model performs well with 88% accuracy. 
+In conclusion, our model performs reliably on the test set. 
 The analysis shows that **Horsepower** and **Engine Size** are the strongest predictors of a car's price. 
 Premium brands like BMW and Porsche naturally cost more, regardless of size.
-
 """)
